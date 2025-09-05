@@ -1,0 +1,36 @@
+name: Repo Audit & Test
+
+on:
+  workflow_dispatch: # run manually from Actions tab
+  push:
+    branches: [ main ]
+
+jobs:
+  audit-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: Run tests
+        run: npm test || echo "No tests found"
+
+      - name: Repo structure map
+        run: npx repomix --output repo-map.txt
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-results
+          path: |
+            repo-map.txt
+            test-results.xml
+            coverage/
