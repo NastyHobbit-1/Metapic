@@ -1,0 +1,41 @@
+MetaPicPick Enhanced v2.0
+==========================
+
+A unified GUI application for extracting and managing AI image metadata.
+
+Key Features:
+- Support for multiple AI image formats (Automatic1111, ComfyUI, NovelAI, General)
+- Advanced metadata editing and validation
+- Statistics tracking and analysis
+- Batch processing capabilities
+- Tabbed interface with persistent layouts
+- Plugin-based parser architecture
+- Enhanced error handling and logging
+
+Directory Structure:
+-------------------
+config/           - Configuration management
+core/            - Core application modules
+parsers/         - Metadata parser plugins
+utils/           - Utility functions and helpers
+docs/            - Documentation files
+tests/           - Test files and examples
+data/            - Application data (statistics, etc.)
+logs/            - Application logs
+
+Main Files:
+-----------
+launch_metapicpick.py    - Main application launcher
+gui_main.py             - GUI implementation
+build_exe.bat           - Build production executable
+build_dev.bat           - Build development executable
+requirements_build.txt  - Build dependencies
+build_config.spec       - PyInstaller configuration
+
+Build Instructions:
+------------------
+1. Run 'build_exe.bat' to create production executable
+2. Run 'build_dev.bat' for development/debugging build
+3. Use 'python launch_metapicpick.py' to run from source
+
+Generated: Thu 09/04/2025 23:09:38.11
