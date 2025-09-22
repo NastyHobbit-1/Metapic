@@ -8,7 +8,7 @@ from __future__ import annotations
 import sys
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 import json
 from collections import defaultdict, Counter
 
@@ -404,6 +404,8 @@ class MetadataTab(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_meta: Optional[ImageMeta] = None
+        self._updating_form = False
+        self._dirty_fields: Set[str] = set()
         self.setup_ui()
     
     def setup_ui(self):
@@ -451,8 +453,10 @@ class MetadataTab(QWidget):
         form_layout.addRow("Seed:", self.seed_spin)
         form_layout.addRow("Prompt:", self.prompt_edit)
         form_layout.addRow("Negative Prompt:", self.negative_prompt_edit)
-        
+
         layout.addWidget(form_group)
+
+        self._connect_field_signals()
         
         # Action buttons
         button_layout = QHBoxLayout()
@@ -470,6 +474,45 @@ class MetadataTab(QWidget):
         button_layout.addStretch()
         
         layout.addLayout(button_layout)
+
+    def _connect_field_signals(self):
+        """Enable save button when fields are modified"""
+
+        self._widget_field_map: Dict[QWidget, str] = {
+            self.model_edit: "model",
+            self.base_model_edit: "base_model",
+            self.sampler_edit: "sampler",
+            self.steps_spin: "steps",
+            self.cfg_spin: "cfg",
+            self.seed_spin: "seed",
+            self.prompt_edit: "prompt",
+            self.negative_prompt_edit: "negative_prompt",
+        }
+
+        for widget in (
+            self.model_edit,
+            self.base_model_edit,
+            self.sampler_edit,
+        ):
+            widget.textChanged.connect(self.on_field_modified)
+
+        self.steps_spin.valueChanged.connect(self.on_field_modified)
+        self.cfg_spin.valueChanged.connect(self.on_field_modified)
+        self.seed_spin.valueChanged.connect(self.on_field_modified)
+        self.prompt_edit.textChanged.connect(self.on_field_modified)
+        self.negative_prompt_edit.textChanged.connect(self.on_field_modified)
+
+    def on_field_modified(self, *args):
+        """Mark the current form as dirty when edited."""
+
+        if self._updating_form or not self.current_meta:
+            return
+        widget = self.sender()
+        if widget and hasattr(self, "_widget_field_map"):
+            field_name = self._widget_field_map.get(widget)
+            if field_name:
+                self._dirty_fields.add(field_name)
+        self.save_btn.setEnabled(True)
     
     def browse_file(self):
         """Browse for image file"""
@@ -482,6 +525,8 @@ class MetadataTab(QWidget):
             self.file_edit.setText(file_path)
             self.load_btn.setEnabled(True)
             self.current_meta = None
+            self.save_btn.setEnabled(False)
+            self._dirty_fields.clear()
     
     def load_metadata(self):
         """Load metadata from selected file"""
@@ -509,8 +554,7 @@ class MetadataTab(QWidget):
             
             # Populate form
             self.populate_form()
-            self.save_btn.setEnabled(True)
-            
+
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load metadata: {e}")
     
@@ -518,25 +562,99 @@ class MetadataTab(QWidget):
         """Populate form with current metadata"""
         if not self.current_meta:
             return
-        
+
         meta = self.current_meta
-        
-        self.model_edit.setText(meta.model or "")
-        self.base_model_edit.setText(meta.base_model or "")
-        self.sampler_edit.setText(meta.sampler or "")
-        self.steps_spin.setValue(meta.steps or 20)
-        self.cfg_spin.setValue(meta.cfg or 7.0)
-        self.seed_spin.setValue(meta.seed or 0)
-        self.prompt_edit.setPlainText(meta.prompt or "")
-        self.negative_prompt_edit.setPlainText(meta.negative_prompt or "")
-    
+
+        self._updating_form = True
+        try:
+            self.model_edit.setText(meta.model or "")
+            self.base_model_edit.setText(meta.base_model or "")
+            self.sampler_edit.setText(meta.sampler or "")
+            self.steps_spin.setValue(meta.steps or 20)
+            self.cfg_spin.setValue(meta.cfg or 7.0)
+            self.seed_spin.setValue(meta.seed or 0)
+            self.prompt_edit.setPlainText(meta.prompt or "")
+            self.negative_prompt_edit.setPlainText(meta.negative_prompt or "")
+        finally:
+            self._updating_form = False
+            self.save_btn.setEnabled(False)
+            self._dirty_fields.clear()
+
     def save_metadata(self):
         """Save metadata to file"""
         if not self.current_meta:
             return
-        
-        # TODO: Implement metadata saving
-        QMessageBox.information(self, "Save", "Metadata saving not yet implemented")
+
+        meta = self.current_meta
+
+        try:
+            # Update ImageMeta fields from form values
+            meta.model = self.model_edit.text().strip() or None
+            meta.base_model = self.base_model_edit.text().strip() or None
+            meta.sampler = self.sampler_edit.text().strip() or None
+            original_steps = meta.steps
+            original_cfg = meta.cfg
+            original_seed = meta.seed
+
+            if "steps" in self._dirty_fields or original_steps is not None:
+                meta.steps = int(self.steps_spin.value()) if "steps" in self._dirty_fields else original_steps
+            else:
+                meta.steps = None
+
+            if "cfg" in self._dirty_fields or original_cfg is not None:
+                meta.cfg = float(self.cfg_spin.value()) if "cfg" in self._dirty_fields else original_cfg
+            else:
+                meta.cfg = None
+
+            if "seed" in self._dirty_fields or original_seed is not None:
+                meta.seed = int(self.seed_spin.value()) if "seed" in self._dirty_fields else original_seed
+            else:
+                meta.seed = None
+
+            prompt_text = self.prompt_edit.toPlainText().strip()
+            meta.prompt = prompt_text or None
+
+            neg_prompt_text = self.negative_prompt_edit.toPlainText().strip()
+            meta.negative_prompt = neg_prompt_text or None
+
+            # Persist to sidecar JSON so other tooling can reload edits
+            sidecar_path = Path(meta.path).with_suffix(".json")
+            sidecar_path.parent.mkdir(parents=True, exist_ok=True)
+
+            serializable = {
+                "model": meta.model,
+                "base_model": meta.base_model,
+                "sampler": meta.sampler,
+                "scheduler": meta.scheduler,
+                "steps": meta.steps,
+                "cfg": meta.cfg,
+                "seed": meta.seed,
+                "prompt": meta.prompt,
+                "negative_prompt": meta.negative_prompt,
+                "method": meta.method,
+            }
+
+            # Remove empty string / None entries but keep zeros
+            clean_serializable = {
+                key: value
+                for key, value in serializable.items()
+                if value is not None and not (isinstance(value, str) and value.strip() == "")
+            }
+
+            with sidecar_path.open("w", encoding="utf-8") as handle:
+                json.dump(clean_serializable, handle, ensure_ascii=False, indent=2)
+                handle.write("\n")
+
+            # Keep parsed metadata in sync for the in-memory model
+            if isinstance(meta.parsed_raw, dict):
+                meta.parsed_raw.update(clean_serializable)
+
+            QMessageBox.information(self, "Success", "Metadata saved successfully.")
+            self.save_btn.setEnabled(False)
+            self._dirty_fields.clear()
+
+        except Exception as exc:
+            QMessageBox.critical(self, "Error", f"Failed to save metadata: {exc}")
 
 class MetaPicEnhancedGUI(QMainWindow):
     """Enhanced MetaPic GUI with comprehensive tabbed interface"""
